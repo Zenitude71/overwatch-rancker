@@ -66,13 +66,14 @@ def main():
     player_totals = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
     
     seuil_heures = getattr(config, 'MIN_HOURS_THRESHOLD', 0.0)
-    print(f"=== DEBUT DU TRAITEMENT (Filtre: {seuil_heures} heures minimum) ===")
+    print(f"=== DEBUT DU TRAITEMENT (Filtre visé: {seuil_heures} heures) ===")
     
     for player_id in config.PLAYERS:
         pseudo = player_id.split('-')[0]
         
         for mode in config.MODES:
             data = get_player_stats(player_id, mode)
+
             if not data:
                 continue
             
@@ -95,16 +96,16 @@ def main():
 
             time.sleep(0.3) 
             
-    roles_data = {"Tank": defaultdict(list), "Damage": defaultdict(list), "Support": defaultdict(list)}
+    # Stockage temporaire brut avant filtrage
+    raw_roles_data = {"Tank": defaultdict(list), "Damage": defaultdict(list), "Support": defaultdict(list)}
     
-    print("\n=== CALCUL DES MOYENNES (sur 10 minutes) ===")
+    print("\n=== CALCUL DES MOYENNES ===")
     for pseudo, heroes_data in player_totals.items():
         for hero, totals in heroes_data.items():
-            time_hours = totals['time_played'] / 3600
-            
-            if time_hours < seuil_heures:
+            if totals['time_played'] <= 0:
                 continue
                 
+            time_hours = totals['time_played'] / 3600
             time_10min = totals['time_played'] / 600
             
             winrate = (totals['games_won'] / totals['games_played'] * 100) if totals['games_played'] > 0 else 0.0
@@ -119,7 +120,7 @@ def main():
             deaths_avg = totals['deaths'] / time_10min if time_10min > 0 else 0
             
             role = heroes.HERO_ROLES[hero]
-            roles_data[role][hero].append({
+            raw_roles_data[role][hero].append({
                 "pseudo": pseudo,
                 "Temps_Jeu_Heures": round(time_hours, 2),
                 "Winrate_%": round(winrate, 2),
@@ -130,6 +131,25 @@ def main():
                 "Soins_Moyenne": round(healing_avg, 2),
                 "Morts_Moyenne": deaths_avg
             })
+
+    # Filtrage intelligent : on garantit au moins 2 joueurs si possible
+    roles_data = {"Tank": defaultdict(list), "Damage": defaultdict(list), "Support": defaultdict(list)}
+    
+    print("=== FILTRAGE INTELLIGENT (Garantie de 2 joueurs min) ===")
+    for role, heroes_dict in raw_roles_data.items():
+        for hero, players_list in heroes_dict.items():
+            # Tri préalable par temps de jeu
+            players_list.sort(key=lambda x: x["Temps_Jeu_Heures"], reverse=True)
+            
+            # On applique le seuil
+            filtered_players = [p for p in players_list if p["Temps_Jeu_Heures"] >= seuil_heures]
+            
+            # Si le filtre élimine trop de monde, on force l'ajout des top joueurs
+            if len(filtered_players) < 2:
+                filtered_players = players_list[:2]
+                
+            if filtered_players:
+                roles_data[role][hero] = filtered_players
 
     final_json = {"Tank": {}, "Damage": {}, "Support": {}}
     print("\n=== CALCUL DES SCORES ET TRI ===")
@@ -159,9 +179,7 @@ def main():
                 
                 p['score'] = round((score_total / total_coef) * 100, 2) if total_coef > 0 else 0.0
 
-            # -------------------------------------------------------------
-            # LE TRI EST ICI : Par Score (décroissant), puis par Temps de jeu
-            # -------------------------------------------------------------
+            # Tri par Score (décroissant), puis par Temps de jeu
             players_list.sort(key=lambda x: (x['score'], x['Temps_Jeu_Heures']), reverse=True)
             
             cleaned_list = []
@@ -180,16 +198,14 @@ def main():
                 
             final_json[role][hero] = cleaned_list
 
-        # -------------------------------------------------------------
-        # TRI ALPHABETIQUE DES HEROS POUR UN JSON TOUT PROPRE
-        # -------------------------------------------------------------
+        # Tri alphabétique des héros
         final_json[role] = dict(sorted(final_json[role].items()))
 
     output_file = os.path.join(config.OUTPUT_DIR, "classement.json")
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(final_json, f, indent=2, ensure_ascii=False)
         
-    print(f"\n[SUCCES] JSON généré et trié avec succès dans : {output_file}")
+    print(f"\n[SUCCES] JSON généré avec succès dans : {output_file}")
 
 if __name__ == "__main__":
     main()
