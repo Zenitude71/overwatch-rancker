@@ -40,7 +40,7 @@ COEFFICIENTS_TANK = {
 
 COEFFICIENTS_DAMAGE = {
     "Winrate_%": 0.5,
-    "KDA": 0.5,
+    "KDA": 0.2,
     "Morts_Moyenne": 0.0,
     "Elims_Moyenne": 0.9,
     "Assists_Moyenne": 0.3,
