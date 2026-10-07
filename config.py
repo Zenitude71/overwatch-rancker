@@ -18,7 +18,7 @@ BASE_URL = "https://overfast-api.tekrop.fr/players"
 MODES = ["quickplay", "competitive"]
 
 # Temps de jeu minimum (en heures) pour être inclus dans le classement
-MIN_HOURS_THRESHOLD = 5.0
+MIN_HOURS_THRESHOLD = 10.0
 
 # Dossier de destination des exports
 OUTPUT_DIR = "results"
@@ -34,7 +34,7 @@ COEFFICIENTS_TANK = {
     "Assists_Moyenne": 0.3,
     "Degats_Moyenne": 0.7,
     "Soins_Moyenne": 0.0,
-    "Temps_Jeu_Heures": 0.1,
+    "Temps_Jeu_Heures": 0.0,
     "Parties_Jouées": 0.0,
 }
 
@@ -46,7 +46,7 @@ COEFFICIENTS_DAMAGE = {
     "Assists_Moyenne": 0.3,
     "Degats_Moyenne": 0.7,
     "Soins_Moyenne": 0.1,
-    "Temps_Jeu_Heures": 0.1,
+    "Temps_Jeu_Heures": 0.0,
     "Parties_Jouées": 0.0,
 }
 
@@ -58,7 +58,7 @@ COEFFICIENTS_SUPPORT = {
     "Assists_Moyenne": 0.7,
     "Degats_Moyenne": 0.3,
     "Soins_Moyenne": 1,
-    "Temps_Jeu_Heures": 0.1,
+    "Temps_Jeu_Heures": 0.0,
     "Parties_Jouées": 0.0,
 }
 
