@@ -34,7 +34,7 @@ COEFFICIENTS_TANK = {
     "Assists_Moyenne": 0.3,
     "Degats_Moyenne": 0.7,
     "Soins_Moyenne": 0.0,
-    "Temps_Jeu_Heures": 0.0,
+    "Temps_Jeu_Heures": 0.1,
     "Parties_Jouées": 0.0,
 }
 
@@ -46,7 +46,7 @@ COEFFICIENTS_DAMAGE = {
     "Assists_Moyenne": 0.3,
     "Degats_Moyenne": 0.7,
     "Soins_Moyenne": 0.1,
-    "Temps_Jeu_Heures": 0.0,
+    "Temps_Jeu_Heures": 0.1,
     "Parties_Jouées": 0.0,
 }
 
@@ -58,7 +58,7 @@ COEFFICIENTS_SUPPORT = {
     "Assists_Moyenne": 0.7,
     "Degats_Moyenne": 0.3,
     "Soins_Moyenne": 1,
-    "Temps_Jeu_Heures": 0.0,
+    "Temps_Jeu_Heures": 0.1,
     "Parties_Jouées": 0.0,
 }
 
