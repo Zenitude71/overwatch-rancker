@@ -11,13 +11,12 @@ def get_player_stats(player_id, gamemode):
     url = f"{config.BASE_URL}/{player_id}/stats/career"
     params = {"gamemode": gamemode}
     
-    print(f" -> Récupération de {player_id} ({gamemode})...")
     try:
         response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
             return response.json()
         elif response.status_code == 404:
-            print(f"    [!] Profil introuvable pour {player_id}.")
+            print(f"    [!] Profil introuvable pour {player_id} ({gamemode}).")
         elif response.status_code == 403:
             print(f"    [!] Profil privé pour {player_id}.")
         else:
@@ -28,9 +27,22 @@ def get_player_stats(player_id, gamemode):
     return None
 
 def extract_stats(hero_data):
-    """Aplatit les données du héros qu'elles soient en listes ou en dictionnaires."""
+    """
+    Extrait les totaux absolus. S'ils sont manquants (souvent le cas en Quickplay),
+    les recalcule à partir des moyennes et du temps de jeu.
+    """
     flat = {}
+    avg_data = {}
+    
+    # 1. On sépare les totaux/général et les moyennes
     for category, content in hero_data.items():
+        if category == "average":
+            if isinstance(content, list):
+                avg_data = {item['key']: item['value'] for item in content if isinstance(item, dict) and 'key' in item}
+            elif isinstance(content, dict):
+                avg_data = content
+            continue
+            
         if isinstance(content, list):
             for item in content:
                 if isinstance(item, dict) and 'key' in item and 'value' in item:
@@ -40,16 +52,45 @@ def extract_stats(hero_data):
                 flat[k] = v
         else:
             flat[category] = content
-            
+
+    time_played = flat.get('time_played', 0)
+    time_10m = time_played / 600.0 if time_played > 0 else 0
+
+    # 2. Extraction des totaux (avec fallback sur la reconstruction via moyennes)
+    # Si le total d'éliminations est 0 mais qu'on a du temps de jeu, c'est que l'API a caché le total (typique du Quickplay).
+    def get_total_or_reconstruct(keys_total, keys_avg):
+        # Cherche dans les totaux
+        for k in keys_total:
+            if k in flat and flat[k] > 0:
+                return flat[k]
+        # Reconstruit depuis les moyennes si absent
+        for k in keys_avg:
+            if k in avg_data and avg_data[k] > 0:
+                return avg_data[k] * time_10m
+        return 0
+
+    eliminations = get_total_or_reconstruct(['eliminations'], ['eliminations', 'eliminations_avg'])
+    assists = get_total_or_reconstruct(['assists'], ['assists', 'assists_avg'])
+    deaths = get_total_or_reconstruct(['deaths'], ['deaths', 'deaths_avg'])
+    damage = get_total_or_reconstruct(['hero_damage_done', 'damage_done', 'all_damage_done', 'damage'], 
+                                      ['damage', 'hero_damage_done', 'damage_avg'])
+    healing = get_total_or_reconstruct(['healing_done', 'healing'], ['healing', 'healing_done', 'healing_avg'])
+
+    # Estimation des parties jouées en Quickplay si manquant
+    games_won = flat.get('games_won', 0)
+    games_played = flat.get('games_played', 0)
+    if games_played == 0 and games_won > 0:
+        games_played = games_won / 0.5  # Approximation à 50% de winrate pour ne pas casser les stats
+
     return {
-        'time_played': flat.get('time_played', 0),
-        'games_won': flat.get('games_won', 0),
-        'games_played': flat.get('games_played', 0),
-        'eliminations': flat.get('eliminations', 0),
-        'assists': flat.get('assists', 0),
-        'deaths': flat.get('deaths', 0),
-        'damage_done': flat.get('hero_damage_done', flat.get('damage_done', flat.get('all_damage_done', flat.get('damage', 0)))),
-        'healing_done': flat.get('healing_done', flat.get('healing', 0))
+        'time_played': time_played,
+        'games_won': games_won,
+        'games_played': games_played,
+        'eliminations': eliminations,
+        'assists': assists,
+        'deaths': deaths,
+        'damage_done': damage,
+        'healing_done': healing
     }
 
 def calculate_norm(val, min_v, max_v, is_inv=False):
@@ -66,10 +107,11 @@ def main():
     player_totals = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
     
     seuil_heures = getattr(config, 'MIN_HOURS_THRESHOLD', 0.0)
-    print(f"=== DEBUT DU TRAITEMENT (Filtre visé: {seuil_heures} heures) ===")
+    print(f"=== DEBUT DU TRAITEMENT (Filtre: {seuil_heures} heures minimum) ===\n")
     
     for player_id in config.PLAYERS:
         pseudo = player_id.split('-')[0]
+        print(f"-> Traitement de {pseudo}...")
         
         for mode in config.MODES:
             data = get_player_stats(player_id, mode)
@@ -78,6 +120,7 @@ def main():
                 continue
             
             heroes_data_api = data.get("heroes_stats", data) 
+            heroes_found = 0
             
             for hero_key, hero_data in heroes_data_api.items():
                 if hero_key not in heroes.HERO_ROLES:
@@ -85,21 +128,26 @@ def main():
                 
                 flat = extract_stats(hero_data)
                 
-                player_totals[pseudo][hero_key]['time_played'] += flat['time_played']
-                player_totals[pseudo][hero_key]['games_won'] += flat['games_won']
-                player_totals[pseudo][hero_key]['games_played'] += flat['games_played']
-                player_totals[pseudo][hero_key]['eliminations'] += flat['eliminations']
-                player_totals[pseudo][hero_key]['assists'] += flat['assists']
-                player_totals[pseudo][hero_key]['deaths'] += flat['deaths']
-                player_totals[pseudo][hero_key]['healing_done'] += flat['healing_done']
-                player_totals[pseudo][hero_key]['damage_done'] += flat['damage_done']
+                if flat['time_played'] > 0:
+                    heroes_found += 1
+                    player_totals[pseudo][hero_key]['time_played'] += flat['time_played']
+                    player_totals[pseudo][hero_key]['games_won'] += flat['games_won']
+                    player_totals[pseudo][hero_key]['games_played'] += flat['games_played']
+                    player_totals[pseudo][hero_key]['eliminations'] += flat['eliminations']
+                    player_totals[pseudo][hero_key]['assists'] += flat['assists']
+                    player_totals[pseudo][hero_key]['deaths'] += flat['deaths']
+                    player_totals[pseudo][hero_key]['healing_done'] += flat['healing_done']
+                    player_totals[pseudo][hero_key]['damage_done'] += flat['damage_done']
+
+            if heroes_found > 0:
+                print(f"    [{mode.upper()}] : Fusion de {heroes_found} héros réussie.")
 
             time.sleep(0.3) 
             
     # Stockage temporaire brut avant filtrage
     raw_roles_data = {"Tank": defaultdict(list), "Damage": defaultdict(list), "Support": defaultdict(list)}
     
-    print("\n=== CALCUL DES MOYENNES ===")
+    print("\n=== CALCUL DES MOYENNES (QP + RANKED FUSIONNES) ===")
     for pseudo, heroes_data in player_totals.items():
         for hero, totals in heroes_data.items():
             if totals['time_played'] <= 0:
@@ -135,16 +183,12 @@ def main():
     # Filtrage intelligent : on garantit au moins 2 joueurs si possible
     roles_data = {"Tank": defaultdict(list), "Damage": defaultdict(list), "Support": defaultdict(list)}
     
-    print("=== FILTRAGE INTELLIGENT (Garantie de 2 joueurs min) ===")
     for role, heroes_dict in raw_roles_data.items():
         for hero, players_list in heroes_dict.items():
-            # Tri préalable par temps de jeu
             players_list.sort(key=lambda x: x["Temps_Jeu_Heures"], reverse=True)
             
-            # On applique le seuil
             filtered_players = [p for p in players_list if p["Temps_Jeu_Heures"] >= seuil_heures]
             
-            # Si le filtre élimine trop de monde, on force l'ajout des top joueurs
             if len(filtered_players) < 2:
                 filtered_players = players_list[:2]
                 
@@ -152,7 +196,6 @@ def main():
                 roles_data[role][hero] = filtered_players
 
     final_json = {"Tank": {}, "Damage": {}, "Support": {}}
-    print("\n=== CALCUL DES SCORES ET TRI ===")
     
     for role, heroes_dict in roles_data.items():
         coefs = config.ROLE_CONFIGS[role]
@@ -205,7 +248,7 @@ def main():
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(final_json, f, indent=2, ensure_ascii=False)
         
-    print(f"\n[SUCCES] JSON généré avec succès dans : {output_file}")
+    print(f"\n[SUCCES] JSON généré avec fusion QP+Ranked dans : {output_file}")
 
 if __name__ == "__main__":
     main()
