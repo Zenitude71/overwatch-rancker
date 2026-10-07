@@ -18,7 +18,7 @@ BASE_URL = "https://overfast-api.tekrop.fr/players"
 MODES = ["quickplay", "competitive"]
 
 # Temps de jeu minimum (en heures) pour être inclus dans le classement
-MIN_HOURS_THRESHOLD = 10.0
+MIN_HOURS_THRESHOLD = 5.0
 
 # Dossier de destination des exports
 OUTPUT_DIR = "results"
