@@ -57,7 +57,6 @@ def extract_stats(hero_data):
     time_10m = time_played / 600.0 if time_played > 0 else 0
 
     # 2. Extraction des totaux (avec fallback sur la reconstruction via moyennes)
-    # Si le total d'éliminations est 0 mais qu'on a du temps de jeu, c'est que l'API a caché le total (typique du Quickplay).
     def get_total_or_reconstruct(keys_total, keys_avg):
         # Cherche dans les totaux
         for k in keys_total:
@@ -105,6 +104,7 @@ def calculate_norm(val, min_v, max_v, is_inv=False):
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
     player_totals = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+    player_global_time = defaultdict(float)  # <-- AJOUT : Pour la somme globale des temps
     
     seuil_heures = getattr(config, 'MIN_HOURS_THRESHOLD', 0.0)
     print(f"=== DEBUT DU TRAITEMENT (Filtre: {seuil_heures} heures minimum) ===\n")
@@ -119,8 +119,19 @@ def main():
             if not data:
                 continue
             
-            heroes_data_api = data.get("heroes_stats", data) 
+            # --- CORRECTION DE L'EXTRACTION ---
+            # Rend l'extraction plus robuste face aux changements de structure de l'API entre QP et Ranked
+            if "heroes" in data:
+                heroes_data_api = data["heroes"]
+            elif "heroes_stats" in data:
+                heroes_data_api = data["heroes_stats"]
+            elif mode in data and "heroes" in data[mode]:
+                heroes_data_api = data[mode]["heroes"]
+            else:
+                heroes_data_api = data
+                
             heroes_found = 0
+            mode_total_time = 0  # Pour logger le temps trouvé spécifiquement dans ce mode
             
             for hero_key, hero_data in heroes_data_api.items():
                 if hero_key not in heroes.HERO_ROLES:
@@ -130,6 +141,12 @@ def main():
                 
                 if flat['time_played'] > 0:
                     heroes_found += 1
+                    mode_total_time += flat['time_played']
+                    
+                    # Ajout au temps global de ce joueur
+                    player_global_time[pseudo] += flat['time_played']
+                    
+                    # Accumulation (Fusion) par héros
                     player_totals[pseudo][hero_key]['time_played'] += flat['time_played']
                     player_totals[pseudo][hero_key]['games_won'] += flat['games_won']
                     player_totals[pseudo][hero_key]['games_played'] += flat['games_played']
@@ -140,11 +157,13 @@ def main():
                     player_totals[pseudo][hero_key]['damage_done'] += flat['damage_done']
 
             if heroes_found > 0:
-                print(f"    [{mode.upper()}] : Fusion de {heroes_found} héros réussie.")
+                heures_mode = round(mode_total_time / 3600, 1)
+                print(f"    [{mode.upper()}] : Fusion de {heroes_found} héros réussie ({heures_mode}h accumulées).")
+            else:
+                print(f"    [{mode.upper()}] : Aucun héros compatible trouvé.")
 
             time.sleep(0.3) 
             
-    # Stockage temporaire brut avant filtrage
     raw_roles_data = {"Tank": defaultdict(list), "Damage": defaultdict(list), "Support": defaultdict(list)}
     
     print("\n=== CALCUL DES MOYENNES (QP + RANKED FUSIONNES) ===")
@@ -156,7 +175,8 @@ def main():
             time_hours = totals['time_played'] / 3600
             time_10min = totals['time_played'] / 600
             
-            winrate = (totals['games_won'] / totals['games_played'] * 100) if totals['games_played'] > 0 else 0.0
+            # Plafond à 100% car l'approximation QP peut causer de légers débordements
+            winrate = min(100.0, (totals['games_won'] / totals['games_played'] * 100)) if totals['games_played'] > 0 else 0.0
             
             deaths = totals['deaths'] if totals['deaths'] > 0 else 1
             kda = (totals['eliminations'] + totals['assists']) / deaths
@@ -195,8 +215,21 @@ def main():
             if filtered_players:
                 roles_data[role][hero] = filtered_players
 
-    final_json = {"Tank": {}, "Damage": {}, "Support": {}}
+    # --- AJOUT DU RESUME GLOBAL DANS LE JSON ---
+    final_json = {
+        "Résumé_Joueurs": {}, 
+        "Tank": {}, 
+        "Damage": {}, 
+        "Support": {}
+    }
     
+    # Remplissage du résumé et tri par celui qui a le plus joué
+    for pseudo, total_time in sorted(player_global_time.items(), key=lambda x: x[1], reverse=True):
+        final_json["Résumé_Joueurs"][pseudo] = {
+            "Temps_Jeu_Total_Heures": round(total_time / 3600, 2)
+        }
+    
+    # Calcul des scores
     for role, heroes_dict in roles_data.items():
         coefs = config.ROLE_CONFIGS[role]
         total_coef = sum(coefs.values())
